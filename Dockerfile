@@ -1,4 +1,4 @@
-FROM python:3.11.3-slim-buster
+FROM python:3
 
 # set work directory
 WORKDIR /usr/src/app
@@ -7,20 +7,10 @@ WORKDIR /usr/src/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# install system dependencies for OpenCV
+# install minimal system dependencies for opencv-python-headless
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
     libgomp1 \
-    libgcc1 \
-    libgl1-mesa-glx \
-    libgtk2.0-dev \
-    ffmpeg \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # install python dependencies
