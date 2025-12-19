@@ -30,7 +30,7 @@ st.sidebar.header("⚙️ Settings")
 # Detection mode selector
 detection_mode = st.sidebar.radio(
     "Detection Mode",
-    options=["📷 Webcam", "🖼️ Image Upload"],
+    options=["🖼️ Image Upload", "📸 Camera Photo", "📷 Webcam (Local Only)"],
     index=0
 )
 
@@ -44,27 +44,36 @@ conf_threshold = st.sidebar.slider(
 
 # Initialize variables
 uploaded_file = None
+camera_photo = None
 camera_index = 0
 start_camera = False
 stop_camera = False
 
-# Webcam settings
-if detection_mode == "📷 Webcam":
-    camera_index = st.sidebar.selectbox(
-        "Camera Device",
-        options=[0, 1, 2],
-        index=0
-    )
-
-    start_camera = st.sidebar.button("▶ Start Camera")
-    stop_camera = st.sidebar.button("⏹ Stop Camera")
-else:
-    # Image upload
+# Mode-specific settings
+if detection_mode == "🖼️ Image Upload":
     uploaded_file = st.sidebar.file_uploader(
         "Upload Image",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=False
     )
+elif detection_mode == "📸 Camera Photo":
+    st.sidebar.info(
+        "📱 **Ambil foto menggunakan kamera perangkat Anda**\n\n"
+        "Mode ini bekerja untuk akses remote/domain."
+    )
+    camera_photo = st.sidebar.camera_input("Take a photo")
+elif detection_mode == "📷 Webcam (Local Only)":
+    st.sidebar.warning(
+        "⚠️ **Catatan:** Mode ini hanya untuk akses lokal.\n\n"
+        "Untuk remote, gunakan **Camera Photo** atau **Image Upload**."
+    )
+    camera_index = st.sidebar.selectbox(
+        "Camera Device",
+        options=[0, 1, 2],
+        index=0
+    )
+    start_camera = st.sidebar.button("▶ Start Camera")
+    stop_camera = st.sidebar.button("⏹ Stop Camera")
 
 # ===============================
 # Session State
@@ -72,10 +81,9 @@ else:
 if "run" not in st.session_state:
     st.session_state.run = False
 
-if detection_mode == "📷 Webcam":
+if detection_mode == "📷 Webcam (Local Only)":
     if start_camera:
         st.session_state.run = True
-
     if stop_camera:
         st.session_state.run = False
 else:
@@ -94,6 +102,54 @@ with col1:
     safety_status_text = st.empty()
 
 # ===============================
+# Helper function for detection
+# ===============================
+def process_image(image):
+    """Process image and return results"""
+    # YOLO inference
+    results = model(image, conf=conf_threshold, verbose=False)
+
+    # Draw bounding boxes
+    annotated_image = results[0].plot()
+
+    # Check for helmet detection
+    detections = results[0].boxes
+    helmet_detected = False
+    person_detected = False
+
+    if len(detections) > 0:
+        class_id_arr = []
+        for box in detections:
+            class_id = int(box.cls[0])
+            class_id_arr.append(class_id)
+            print(f"ID={class_id}")
+        has_person = 9 in class_id_arr
+        has_helmet = 2 in class_id_arr
+
+        person_detected = has_person
+        helmet_detected = has_helmet
+
+        print(f"Person: {person_detected}, Helmet: {helmet_detected}")
+
+    # Convert BGR → RGB
+    annotated_image = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
+
+    return annotated_image, person_detected, helmet_detected, len(detections)
+
+def display_safety_status(person_detected, helmet_detected):
+    """Display safety status message"""
+    if person_detected and helmet_detected:
+        safety_status_text.success("✅ **AMAN: K3 Terpenuhi**")
+    elif person_detected and not helmet_detected:
+        safety_status_text.error(
+            "🚨 **PELANGGARAN: APD TIDAK LENGKAP.** Terdeteksi Pekerja Tanpa Helm."
+        )
+    elif not person_detected and helmet_detected:
+        safety_status_text.error("📌 Helm terdeteksi tanpa pekerja")
+    else:
+        safety_status_text.info("📌 Tidak terdeteksi pekerja dan juga helm")
+
+# ===============================
 # Image Upload Mode
 # ===============================
 if detection_mode == "🖼️ Image Upload":
@@ -102,56 +158,43 @@ if detection_mode == "🖼️ Image Upload":
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-        # YOLO inference
-        results = model(image, conf=conf_threshold, verbose=False)
-
-        # Draw bounding boxes
-        annotated_image = results[0].plot()
-
-        # Check for helmet detection
-        detections = results[0].boxes
-        helmet_detected = False
-        no_helmet_detected = False
-        person_detected = False
-        no_person_detected = False
-
-        if len(detections) > 0:
-            class_id_arr = []
-            for box in detections:
-                class_id = int(box.cls[0])
-                class_id_arr.append(class_id)
-                print(f"ID={class_id}")
-            has_person = 9 in class_id_arr
-            has_helmet = 2 in class_id_arr
-
-            person_detected = has_person
-            helmet_detected = has_helmet
-
-            print(f"{helmet_detected} = {no_helmet_detected}")
-
-        # Convert BGR → RGB
-        annotated_image = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
+        # Process image
+        annotated_image, person_detected, helmet_detected, detection_count = process_image(image)
 
         # Display image
         FRAME_WINDOW.image(annotated_image, use_container_width=True)
 
-        # Display safety status
-        if person_detected and helmet_detected:
-            safety_status_text.success("✅ **AMAN: K3 Terpenuhi**")
-        elif person_detected and not helmet_detected:
-            safety_status_text.error(
-                "🚨 **PELANGGARAN: APD TIDAK LENGKAP.** Terdeteksi Pekerja Tanpa Helm."
-            )
-        elif not person_detected and helmet_detected:
-            safety_status_text.error("📌 Helm terdeteksi tanpa pekerja")
-        else:
-            safety_status_text.info("📌 Tidak terdeteksi pekerja dan juga helm")
+        # Display status
+        fps_text.info(f"🔍 Detections: {detection_count}")
+        display_safety_status(person_detected, helmet_detected)
         status_text.success("✅ Image processed successfully")
     else:
         status_text.info("📌 Upload an image to begin detection")
 
 # ===============================
-# Camera Loop
+# Camera Photo Mode
+# ===============================
+elif detection_mode == "📸 Camera Photo":
+    if camera_photo is not None:
+        # Read camera photo
+        file_bytes = np.asarray(bytearray(camera_photo.read()), dtype=np.uint8)
+        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+        # Process image
+        annotated_image, person_detected, helmet_detected, detection_count = process_image(image)
+
+        # Display image
+        FRAME_WINDOW.image(annotated_image, use_container_width=True)
+
+        # Display status
+        fps_text.info(f"🔍 Detections: {detection_count}")
+        display_safety_status(person_detected, helmet_detected)
+        status_text.success("✅ Photo processed successfully")
+    else:
+        status_text.info("📌 Take a photo using the camera in sidebar")
+
+# ===============================
+# Webcam Loop (Local Only)
 # ===============================
 elif st.session_state.run:
     cap = cv2.VideoCapture(camera_index)
@@ -161,8 +204,13 @@ elif st.session_state.run:
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     if not cap.isOpened():
-        st.error("❌ Cannot access camera")
+        status_text.error(
+            "❌ **Camera not accessible**\n\n"
+            "Kamera tidak dapat diakses. Ini normal saat menjalankan aplikasi di Docker atau akses remote.\n\n"
+            "**Solusi:** Gunakan mode **🖼️ Image Upload** di sidebar untuk deteksi dari gambar."
+        )
         st.session_state.run = False
+        cap = None
 
     prev_time = 0
 
