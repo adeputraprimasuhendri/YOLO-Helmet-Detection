@@ -1,5 +1,14 @@
 import streamlit as st
-import cv2
+try:
+    import cv2
+except ImportError as e:
+    import streamlit as st
+    st.error(
+        "❌ OpenCV (cv2) gagal di-load.\n\n"
+        "Pastikan `opencv-python-headless` ada di requirements.txt"
+    )
+    st.stop()
+
 import numpy as np
 from ultralytics import YOLO
 
