@@ -1,27 +1,18 @@
 import streamlit as st
-try:
-    import cv2
-except ImportError as e:
-    import streamlit as st
-    st.error(
-        "❌ OpenCV (cv2) gagal di-load.\n\n"
-        "Pastikan `opencv-python-headless` ada di requirements.txt"
-    )
-    st.stop()
-
-import numpy as np
+import cv2
 from ultralytics import YOLO
+import numpy as np
+import time
 
 # ===============================
 # Page Config
 # ===============================
 st.set_page_config(
-    page_title="YOLO Helmet Detection",
+    page_title="YOLO Webcam Detection",
     layout="wide"
 )
 
-st.title("📷 YOLO Helmet Detection (Cloud Safe)")
-
+st.title("📷 YOLO Real-time Helmet Detection")
 # ===============================
 # Load YOLO Model (cached)
 # ===============================
@@ -36,112 +27,207 @@ model = load_model()
 # ===============================
 st.sidebar.header("⚙️ Settings")
 
-mode = st.sidebar.radio(
+# Detection mode selector
+detection_mode = st.sidebar.radio(
     "Detection Mode",
-    ["📷 Camera", "🖼️ Image Upload"]
+    options=["📷 Webcam", "🖼️ Image Upload"],
+    index=0
 )
 
 conf_threshold = st.sidebar.slider(
     "Confidence Threshold",
-    0.1, 1.0, 0.4, 0.05
+    min_value=0.1,
+    max_value=1.0,
+    value=0.4,
+    step=0.05
 )
 
+# Initialize variables
+uploaded_file = None
+camera_index = 0
+start_camera = False
+stop_camera = False
+
+# Webcam settings
+if detection_mode == "📷 Webcam":
+    camera_index = st.sidebar.selectbox(
+        "Camera Device",
+        options=[0, 1, 2],
+        index=0
+    )
+
+    start_camera = st.sidebar.button("▶ Start Camera")
+    stop_camera = st.sidebar.button("⏹ Stop Camera")
+else:
+    # Image upload
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Image",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=False
+    )
+
 # ===============================
-# Layout
+# Session State
 # ===============================
+if "run" not in st.session_state:
+    st.session_state.run = False
+
+if detection_mode == "📷 Webcam":
+    if start_camera:
+        st.session_state.run = True
+
+    if stop_camera:
+        st.session_state.run = False
+else:
+    st.session_state.run = False
+
+# ===============================
+# Camera Display
+# ===============================
+# Create column layout for 50% width
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    image_box = st.empty()
-    status_box = st.empty()
-    info_box = st.empty()
+    FRAME_WINDOW = st.empty()
+    status_text = st.empty()
+    fps_text = st.empty()
+    safety_status_text = st.empty()
 
 # ===============================
-# IMAGE UPLOAD MODE
+# Image Upload Mode
 # ===============================
-if mode == "🖼️ Image Upload":
-    uploaded = st.sidebar.file_uploader(
-        "Upload Image",
-        type=["jpg", "jpeg", "png"]
-    )
-
-    if uploaded:
-        file_bytes = np.asarray(
-            bytearray(uploaded.read()), dtype=np.uint8
-        )
+if detection_mode == "🖼️ Image Upload":
+    if uploaded_file is not None:
+        # Read uploaded image
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
+        # YOLO inference
         results = model(image, conf=conf_threshold, verbose=False)
-        annotated = results[0].plot()
 
-        boxes = results[0].boxes
-        helmet = False
-        no_helmet = False
+        # Draw bounding boxes
+        annotated_image = results[0].plot()
 
-        for box in boxes:
-            cls_id = int(box.cls[0])
-            cls_name = model.names[cls_id].lower()
+        # Check for helmet detection
+        detections = results[0].boxes
+        helmet_detected = False
+        no_helmet_detected = False
+        person_detected = False
+        no_person_detected = False
 
-            if "helmet" in cls_name or "hard hat" in cls_name:
-                helmet = True
-            elif "person" in cls_name:
-                no_helmet = True
+        if len(detections) > 0:
+            class_id_arr = []
+            for box in detections:
+                class_id = int(box.cls[0])
+                class_id_arr.append(class_id)
+                print(f"ID={class_id}")
+            has_person = 9 in class_id_arr
+            has_helmet = 2 in class_id_arr
 
-        annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-        image_box.image(annotated, use_container_width=True)
+            person_detected = has_person
+            helmet_detected = has_helmet
 
-        if no_helmet:
-            status_box.error("🚨 **PELANGGARAN: APD TIDAK LENGKAP**")
-        elif helmet:
-            status_box.success("✅ **AMAN: K3 Terpenuhi**")
+            print(f"{helmet_detected} = {no_helmet_detected}")
+
+        # Convert BGR → RGB
+        annotated_image = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
+
+        # Display image
+        FRAME_WINDOW.image(annotated_image, use_container_width=True)
+
+        # Display safety status
+        if person_detected and helmet_detected:
+            safety_status_text.success("✅ **AMAN: K3 Terpenuhi**")
+        elif person_detected and not helmet_detected:
+            safety_status_text.error(
+                "🚨 **PELANGGARAN: APD TIDAK LENGKAP.** Terdeteksi Pekerja Tanpa Helm."
+            )
+        elif not person_detected and helmet_detected:
+            safety_status_text.error("📌 Helm terdeteksi tanpa pekerja")
         else:
-            status_box.info("📌 Tidak ada deteksi")
-
-        info_box.info(f"🔍 Total Detections: {len(boxes)}")
+            safety_status_text.info("📌 Tidak terdeteksi pekerja dan juga helm")
+        status_text.success("✅ Image processed successfully")
     else:
-        status_box.info("📌 Upload image untuk memulai")
+        status_text.info("📌 Upload an image to begin detection")
 
 # ===============================
-# CAMERA MODE (STREAMLIT CLOUD SAFE)
+# Camera Loop
 # ===============================
-else:
-    camera_image = st.camera_input("📷 Ambil Gambar dari Kamera")
+elif st.session_state.run:
+    cap = cv2.VideoCapture(camera_index)
 
-    if camera_image:
-        file_bytes = np.asarray(
-            bytearray(camera_image.read()), dtype=np.uint8
-        )
-        frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    # Reduce resolution for higher FPS
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
+    if not cap.isOpened():
+        st.error("❌ Cannot access camera")
+        st.session_state.run = False
+
+    prev_time = 0
+
+    while st.session_state.run:
+        ret, frame = cap.read()
+        if not ret:
+            status_text.error("❌ Failed to read frame")
+            break
+
+        # YOLO inference
         results = model(frame, conf=conf_threshold, verbose=False)
-        annotated = results[0].plot()
 
-        boxes = results[0].boxes
-        helmet = False
-        no_helmet = False
+        # Draw bounding boxes
+        annotated_frame = results[0].plot()
 
-        for box in boxes:
-            cls_id = int(box.cls[0])
-            cls_name = model.names[cls_id].lower()
+        # Check for helmet detection
+        detections = results[0].boxes
+        helmet_detected = False
+        no_helmet_detected = False
+        person_detected = False
+        no_person_detected = False
 
-            if "helmet" in cls_name or "hard hat" in cls_name:
-                helmet = True
-            elif "person" in cls_name:
-                no_helmet = True
+        if len(detections) > 0:
+            class_id_arr = []
+            for box in detections:
+                class_id = int(box.cls[0])
+                class_id_arr.append(class_id)
+                print(f"ID={class_id}")
+            has_person = 9 in class_id_arr
+            has_helmet = 2 in class_id_arr
 
-        annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-        image_box.image(annotated, use_container_width=True)
+            person_detected = has_person
+            helmet_detected = has_helmet
 
-        if no_helmet:
-            status_box.error("🚨 **PELANGGARAN: APD TIDAK LENGKAP**")
-        elif helmet:
-            status_box.success("✅ **AMAN: K3 Terpenuhi**")
+            print(f"{helmet_detected} = {no_helmet_detected}")
+
+        # Display safety status
+        if person_detected and helmet_detected:
+            safety_status_text.success("✅ **AMAN: K3 Terpenuhi**")
+        elif person_detected and not helmet_detected:
+            safety_status_text.error(
+                "🚨 **PELANGGARAN: APD TIDAK LENGKAP.** Terdeteksi Pekerja Tanpa Helm."
+            )
+        elif not person_detected and helmet_detected:
+            safety_status_text.error("📌 Helm terdeteksi tanpa pekerja")
         else:
-            status_box.info("📌 Tidak ada deteksi")
+            safety_status_text.info("📌 Tidak terdeteksi pekerja dan juga helm")
 
-        info_box.info(f"🔍 Total Detections: {len(boxes)}")
-    else:
-        status_box.info("📌 Ambil gambar dari kamera")
+        # Convert BGR → RGB
+        annotated_frame = cv2.cvtColor(
+            annotated_frame, cv2.COLOR_BGR2RGB
+        )
+
+        # Show results
+        FRAME_WINDOW.image(
+            annotated_frame,
+            use_container_width=True
+        )
+        status_text.success("🟢 Camera Running")
+    if cap:
+        cap.release()
+        status_text.warning("🟡 Camera Stopped")
+
+else:
+    status_text.info("📌 Click **Start Camera** to begin")
 
 # ===============================
 # Footer
