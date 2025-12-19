@@ -3,6 +3,8 @@ import cv2
 from ultralytics import YOLO
 import numpy as np
 import time
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import av
 
 # ===============================
 # Page Config
@@ -30,7 +32,7 @@ st.sidebar.header("⚙️ Settings")
 # Detection mode selector
 detection_mode = st.sidebar.radio(
     "Detection Mode",
-    options=["🖼️ Image Upload", "📸 Camera Photo", "📷 Webcam (Local Only)"],
+    options=["📹 Live Camera (Remote)", "📸 Camera Photo", "🖼️ Image Upload", "📷 Webcam (Local Only)"],
     index=0
 )
 
@@ -50,11 +52,12 @@ start_camera = False
 stop_camera = False
 
 # Mode-specific settings
-if detection_mode == "🖼️ Image Upload":
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload Image",
-        type=["jpg", "jpeg", "png"],
-        accept_multiple_files=False
+if detection_mode == "📹 Live Camera (Remote)":
+    st.sidebar.success(
+        "🎥 **Live streaming dari kamera browser Anda**\n\n"
+        "✅ Bekerja untuk akses remote/domain\n"
+        "✅ Real-time detection\n"
+        "✅ Otomatis meminta izin kamera"
     )
 elif detection_mode == "📸 Camera Photo":
     st.sidebar.info(
@@ -62,10 +65,16 @@ elif detection_mode == "📸 Camera Photo":
         "Mode ini bekerja untuk akses remote/domain."
     )
     camera_photo = st.sidebar.camera_input("Take a photo")
+elif detection_mode == "🖼️ Image Upload":
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Image",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=False
+    )
 elif detection_mode == "📷 Webcam (Local Only)":
     st.sidebar.warning(
         "⚠️ **Catatan:** Mode ini hanya untuk akses lokal.\n\n"
-        "Untuk remote, gunakan **Camera Photo** atau **Image Upload**."
+        "Untuk remote, gunakan **Live Camera** atau **Camera Photo**."
     )
     camera_index = st.sidebar.selectbox(
         "Camera Device",
@@ -192,6 +201,64 @@ elif detection_mode == "📸 Camera Photo":
         status_text.success("✅ Photo processed successfully")
     else:
         status_text.info("📌 Take a photo using the camera in sidebar")
+
+# ===============================
+# Live Camera Mode (WebRTC - Remote)
+# ===============================
+elif detection_mode == "📹 Live Camera (Remote)":
+    # WebRTC Configuration
+    RTC_CONFIGURATION = RTCConfiguration(
+        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+    )
+
+    class VideoProcessor:
+        def __init__(self):
+            self.conf_threshold = conf_threshold
+
+        def recv(self, frame):
+            img = frame.to_ndarray(format="bgr24")
+
+            # YOLO inference
+            results = model(img, conf=self.conf_threshold, verbose=False)
+
+            # Draw bounding boxes
+            annotated_frame = results[0].plot()
+
+            # Check for helmet detection
+            detections = results[0].boxes
+            if len(detections) > 0:
+                class_id_arr = []
+                for box in detections:
+                    class_id = int(box.cls[0])
+                    class_id_arr.append(class_id)
+
+                has_person = 9 in class_id_arr
+                has_helmet = 2 in class_id_arr
+
+                # Add status text on frame
+                if has_person and has_helmet:
+                    cv2.putText(annotated_frame, "AMAN: K3 Terpenuhi", (10, 30),
+                               cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 255, 0), 2)
+                elif has_person and not has_helmet:
+                    cv2.putText(annotated_frame, "PELANGGARAN: Tanpa Helm!", (10, 30),
+                               cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 0, 255), 2)
+
+            return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+
+    webrtc_ctx = webrtc_streamer(
+        key="helmet-detection",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration=RTC_CONFIGURATION,
+        video_processor_factory=VideoProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
+
+    status_text.info(
+        "📹 **Live Camera aktif**\n\n"
+        "Kamera akan otomatis meminta izin. "
+        "Deteksi helmet berjalan secara real-time."
+    )
 
 # ===============================
 # Webcam Loop (Local Only)
