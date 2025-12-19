@@ -9,15 +9,14 @@ ENV PYTHONUNBUFFERED=1
 
 # install system dependencies for OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
+    libxrender1 \
     libgomp1 \
-    libgthread-2.0-0 \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    libgcc1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # install python dependencies
 RUN pip install --upgrade pip
