@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   helmet-detection:
-    image: streamlit
+    build: .
     container_name: helmet-detection-app
     ports:
       - "8501:8501"
