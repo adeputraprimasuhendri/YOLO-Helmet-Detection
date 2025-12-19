@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  helmet-detection:
+    image: streamlit
+    container_name: helmet-detection-app
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    restart: unless-stopped
+    networks:
+      - apps-net
+
+networks:
+  apps-net:
+    external: true
