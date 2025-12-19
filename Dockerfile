@@ -2,16 +2,25 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
+# Install system dependencies including OpenCV requirements
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     software-properties-common \
-    git \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/adeputraprimasuhendri/YOLO-Helmet-Detection .
+# Copy local application files
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-RUN pip3 install -r requirements.txt
+# Copy the rest of the application
+COPY . .
 
 EXPOSE 8501
 
